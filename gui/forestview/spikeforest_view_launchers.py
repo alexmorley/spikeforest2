@@ -1,11 +1,11 @@
-from spikeforest_views.currentstateview import CurrentStateView
-from spikeforest_views.recordingtableview import RecordingTableView
-from recording_views.electrodegeometryview import ElectrodeGeometryView
-from recording_views.timeseriesview import TimeseriesView
-from recording_views.templatesview import TemplatesView
-from recording_views.recordingsummaryview import RecordingSummaryView
-from recording_views.unitstableview import UnitsTableView
-from recording_views.sortingresultstableview import SortingResultsTableView
+from .spikeforest_views.currentstateview import CurrentStateView
+from .spikeforest_views.recordingtableview import RecordingTableView
+from .recording_views.electrodegeometryview import ElectrodeGeometryView
+from .recording_views.timeseriesview import TimeseriesView
+from .recording_views.templatesview import TemplatesView
+from .recording_views.recordingsummaryview import RecordingSummaryView
+from .recording_views.unitstableview import UnitsTableView
+from .recording_views.sortingresultstableview import SortingResultsTableView
 
 def get_spikeforest_view_launchers(context):
     launchers=[]
