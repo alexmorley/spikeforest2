@@ -2,7 +2,7 @@ from spikeforest import SFMdaRecordingExtractor, SFMdaSortingExtractor, Efficien
 from copy import deepcopy
 import spikeforestwidgets as SFW
 from mountaintools import client as mt
-from bandpass_filter import bandpass_filter
+from .bandpass_filter import bandpass_filter
 
 class RecordingContext():
     def __init__(self, recording_object, *, download=True, create_earx=True, precompute_multiscale=True):
