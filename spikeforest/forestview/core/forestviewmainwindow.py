@@ -44,7 +44,8 @@ class ForestViewMainWindow(vd.Component):
 
     def _update_sizes(self):
         width = self._size[0]
-        width1 = int(min(300, width*0.3))
+        #width1 = int(min(300, width*0.3))
+        width1 = 300
         width2 = width-width1-30
         height = self._size[1]
         height1 = int(height/2)-5
@@ -144,6 +145,7 @@ class ViewFrame(vd.Component):
         self.refresh()
     def render(self):
         if self._view:
+            print('rendering view')
             return self._view
         else:
             return vd.components.ScrollArea(

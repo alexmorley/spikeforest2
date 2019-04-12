@@ -6,7 +6,7 @@ from .bandpass_filter import bandpass_filter
 
 class RecordingContext():
     def __init__(self, recording_object, *, download=True, create_earx=True, precompute_multiscale=True):
-        from sortingresultcontext import SortingResultContext # avoid cyclic dependency
+        from .sortingresultcontext import SortingResultContext # avoid cyclic dependency
 
         self._signal_handlers = dict()
         self._any_state_change_handlers = []
@@ -46,8 +46,8 @@ class RecordingContext():
         if self._download:
             print('******** FORESTVIEW: Downloading recording file if needed...')
         recdir = self._recording_object['directory']
-        raw_fname=self._recording_object.get('raw_fname', 'raw.mda')
-        params_fname=self._recording_object.get('params_fname', 'params.json')
+        raw_fname = self._recording_object.get('raw_fname', 'raw.mda')
+        params_fname = self._recording_object.get('params_fname', 'params.json')
         self._rx = SFMdaRecordingExtractor(dataset_directory = recdir, download=self._download, raw_fname=raw_fname, params_fname=params_fname)
         self._rx = bandpass_filter(self._rx)
 
@@ -75,7 +75,7 @@ class RecordingContext():
         return self._sorting_result_contexts[name]
 
     def addSortingResult(self, sorting_result_object):
-        from sortingresultcontext import SortingResultContext # avoid cyclic dependency
+        from .sortingresultcontext import SortingResultContext # avoid cyclic dependency
         sc = SortingResultContext(sorting_result_object=sorting_result_object, recording_context=self)
         sc.onAnyStateChanged(self._trigger_any_state_change_handlers)
         self._sorting_result_contexts[sorting_result_object['sorter']['name']]=sc

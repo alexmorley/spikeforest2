@@ -8,16 +8,10 @@ from matplotlib import pyplot as plt
 from sklearn.decomposition import PCA
 import numpy as np
 
-source_path=os.path.dirname(os.path.realpath(__file__))
-
-def _mda32_to_base64(X):
-    f=io.BytesIO()
-    mdaio.writemda32(X,f)
-    return base64.b64encode(f.getvalue()).decode('utf-8')
-
-class FeatureSpaceWidget(vd.Component):
+class FeatureSpaceWidgetPlotly(vd.Component):
     def __init__(self, *, recording, sorting, channels=None, unit_ids=None, width=14, height=7, snippet_len=100,
-                 title='', max_num_spikes_per_unit=50):
+                 title='', max_num_spikes_per_unit=1000):
+        vd.Component.__init__(self)
         self._recording = recording
         self._sorting = sorting
         self._channels = channels
@@ -29,31 +23,8 @@ class FeatureSpaceWidget(vd.Component):
         self._snippet_len = snippet_len
         self._title = title
         self._max_num_spikes_per_unit = max_num_spikes_per_unit
-        self._size=(100,100)
-
-    def _init_js(self):
-        vd.Component.__init__(self)
-
-        vd.devel.loadBootstrap()
-        vd.devel.loadCss(url='https://stackpath.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css')
-        vd.devel.loadJavascript(path=source_path+'/mda.js')
-        vd.devel.loadJavascript(path=source_path+'/featurespacemodel.js')
-        vd.devel.loadJavascript(path=source_path+'/canvaswidget.js')
-        vd.devel.loadJavascript(path=source_path+'/featurespacewidget.js')
-        vd.devel.loadJavascript(path=source_path+'/../dist/jquery-3.3.1.min.js')
-
-        self._div_id='SFFeatureSpaceWidget-'+str(uuid.uuid4())
-	
-        features = arr_to_js_string(self._features)
-
-        js_lines=[
-                "window.sfdata=window.sfdata||{}",
-                "window.sfdata.test=0",
-                "window.sfdata['features']={}".format(features)
-                    ]
-        js = ";".join(js_lines)
-        vd.devel.loadJavascript(js=js)
-        self._size=(800,400)
+        self._size=(800,500)
+        self._do_compute()
 
     def setSize(self,size):
         if self._size==size:
@@ -62,25 +33,22 @@ class FeatureSpaceWidget(vd.Component):
         self.refresh()
 
     def render(self):
-        self._do_compute()
-        self._init_js()
-        print('rendering featurespacewidget...')
-        div=vd.div(id=self._div_id)
-        js="""
-        let W=new window.FeatureSpaceWidget();
-        let A=new window.Mda();
-        W.setFeatures(window.sfdata['features']);
-        W.setSize({width},{height})
-        $('#{div_id}').empty();
-        $('#{div_id}').css({width:'{width}px',height:'{height}px'})
-        $('#{div_id}').append(W.element());
-        """
-        js=self._div_id.join(js.split('{div_id}'))
-        js=js.replace('{width}',str(self._size[0]))
-        js=js.replace('{height}',str(self._size[1]))
-        js='{}'.format(self._recording.getSamplingFrequency()).join(js.split('{samplerate}'))
-        vd.devel.loadJavascript(js=js,delay=1)
-        return div
+        print('rendering featurespacewidget......')
+        data = []
+        for ii, ff in enumerate(self._features):
+            data.append(dict(
+                x=ff[1,:].ravel(),
+                y=ff[2,:].ravel(),
+                mode = 'markers',
+                name = 'Unit {}'.format(self._unit_ids[ii])
+            ))
+        plot=vd.components.PlotlyPlot(
+            data = data,
+            layout = dict(margin=dict(t=5)),
+            config = dict(),
+            size = self._size
+        )
+        return plot
 
     def plot(self):
         self._do_plot()
@@ -190,13 +158,3 @@ class FeatureSpaceWidget(vd.Component):
             spikes = np.zeros((self._recording.getNumChannels(), self._snippet_len, 0))
         return spikes, st[event_indices]
 
-import re
-def arr_to_js_string(arr):
-    if not isinstance(arr[0],str):
-        try:
-            len(arr[0])
-            return arr_to_js_string([arr_to_js_string(a) for a in arr])
-        except TypeError:
-            None
-    js_string = '[{}]'.format(','.join(str(x) for x in arr))
-    return js_string.replace("'", "")
