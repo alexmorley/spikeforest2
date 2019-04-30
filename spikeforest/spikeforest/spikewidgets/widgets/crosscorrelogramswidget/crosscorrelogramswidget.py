@@ -92,6 +92,9 @@ def compute_crosscorrelogram(x, y=None, *, max_dt_tp, bin_size_tp, max_samples=N
         auto = True
     else: 
         auto = False
+
+    x = np.sort(x)
+    y = np.sort(y)
     if max_samples is not None:
         if max_samples < len(x):
             x = np.random.choice(x, size=max_samples, replace=False)

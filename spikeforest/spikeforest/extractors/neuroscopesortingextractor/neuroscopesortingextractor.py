@@ -51,11 +51,14 @@ class NeuroscopeSortingExtractor(SortingExtractor):
         unit_ids = sorting.getUnitIds()
         spiketrains = [sorting.getUnitSpikeTrain(u) for u in unit_ids]
         res = np.concatenate(spiketrains).ravel()
-        clu = np.concatenate([np.repeat(i+1,len(st)) for i,st in enumerate(spiketrains)]).ravel()
+        clu = np.concatenate([np.repeat(i+2,len(st)) for i,st in enumerate(spiketrains)]).ravel()
         res_sort = np.argsort(res)
         res = res[res_sort]
         clu = clu[res_sort]
-        clu = np.insert(clu, 0, len(unit_ids))
+        # add fake 'unit 1'
+        clu = np.insert(clu, 0, 1)
+        res = np.insert(res, 0, 1)
+        clu = np.insert(clu, 0, len(unit_ids)+1)
 
         np.savetxt(save_res, res, fmt='%i')
         np.savetxt(save_clu, clu, fmt='%i')
