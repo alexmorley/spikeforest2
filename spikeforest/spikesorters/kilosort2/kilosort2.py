@@ -42,20 +42,19 @@ class KiloSort2(mlpr.Processor):
     freq_max = mlpr.FloatParameter(
         optional=True, default=6000, description='Use 0 for no bandpass filtering')
     merge_thresh = mlpr.FloatParameter(
-        optional=True, default=0.98, description='TODO')
+        optional=True, default=0.98, description='Threshold for merging clusters.')
     pc_per_chan = mlpr.IntegerParameter(
-        optional=True, default=3, description='TODO')
+        optional=True, default=3, description='Principal Components per channel')
     Th1 = mlpr.FloatParameter(
-        optional=True, default=10, description='TODO')
+        optional=True, default=10, description='Threshold for projections on last pass.')
     Th2 = mlpr.FloatParameter(
-        optional=True, default=4, description='TODO')
+        optional=True, default=4, description='Threshold for projections.')
     CAR = mlpr.IntegerParameter(
-        optional=True, default=1, description='TODO')
+        optional=True, default=1, description='Whether to do common average referencing.')
     nfilt_factor = mlpr.IntegerParameter(
-        optional=True, default=4, description='TODO')
+        optional=True, default=4, description='Max number of assignable clusters (even during fitting) for each channel.')
     NT_fac = mlpr.IntegerParameter(
-        optional=True, default=1024, description='TODO')
-
+        optional=True, default=1024, description='Batch size (will be multiplied by 32).')
 
     def run(self):
         code = ''.join(random.choice(string.ascii_uppercase)
@@ -172,6 +171,7 @@ catch e
     quit(1);
 end
 quit(0);
+<<<<<<< HEAD
 =======
     print('Running Kilosort2 in {tmpdir}...'.format(tmpdir=tmpdir))
     cmd = '''
@@ -183,11 +183,16 @@ quit(0);
         end
         quit(0);
 >>>>>>> ae3bd560760d331bf0cd4bbf16f0b9be656abe61
+=======
+>>>>>>> ks2_from_origin
         '''
     cmd = cmd.format(source_dir=source_dir, ksort=KILOSORT2_PATH, iclust=IRONCLUST_PATH, \
             tmpdir=tmpdir, raw=dataset_dir+'/raw.mda', geom=dataset_dir+'/geom.csv', \
             firings=tmpdir+'/firings.mda', arg=dataset_dir+'/argfile.txt')
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> ks2_from_origin
     matlab_cmd = mlpr.ShellScript(cmd,script_path=tmpdir+'/run_kilosort.m',keep_temp_files=True)
     matlab_cmd.write();
     shell_cmd = '''
@@ -198,6 +203,7 @@ quit(0);
     '''.format(tmpdir=tmpdir,lf=logfilename)
     shell_cmd = mlpr.ShellScript(shell_cmd, script_path=tmpdir+'/run_kilosort.sh', keep_temp_files=True)
     shell_cmd.write(tmpdir+'/run_kilosort.sh')
+<<<<<<< HEAD
 =======
     matlab_cmd = mlpr.ShellScript(cmd,script_path=tmpdir+'/run_kilosort2.m',keep_temp_files=True)
     matlab_cmd.write()
@@ -210,6 +216,8 @@ quit(0);
     shell_cmd = mlpr.ShellScript(shell_cmd, script_path=tmpdir+'/run_kilosort2.sh', keep_temp_files=True)
     shell_cmd.write(tmpdir+'/run_kilosort2.sh')
 >>>>>>> ae3bd560760d331bf0cd4bbf16f0b9be656abe61
+=======
+>>>>>>> ks2_from_origin
     shell_cmd.start()
     retcode = shell_cmd.wait()
 
