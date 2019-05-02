@@ -158,6 +158,7 @@ def kilosort2_helper(*,
     txt += 'NT_fac={}\n'.format(NT_fac)
     _write_text_file(dataset_dir+'/argfile.txt', txt)
 
+<<<<<<< HEAD
     print('Running kilosort2...')
     print('Running kilosort2 in {tmpdir}...'.format(tmpdir=tmpdir))
     logfilename = 'run.log'
@@ -171,10 +172,22 @@ catch e
     quit(1);
 end
 quit(0);
+=======
+    print('Running Kilosort2 in {tmpdir}...'.format(tmpdir=tmpdir))
+    cmd = '''
+        addpath('{source_dir}');
+        try
+            p_kilosort2('{ksort}', '{iclust}', '{tmpdir}', '{raw}', '{geom}', '{firings}', '{arg}');
+        catch
+            quit(1);
+        end
+        quit(0);
+>>>>>>> ae3bd560760d331bf0cd4bbf16f0b9be656abe61
         '''
     cmd = cmd.format(source_dir=source_dir, ksort=KILOSORT2_PATH, iclust=IRONCLUST_PATH, \
             tmpdir=tmpdir, raw=dataset_dir+'/raw.mda', geom=dataset_dir+'/geom.csv', \
             firings=tmpdir+'/firings.mda', arg=dataset_dir+'/argfile.txt')
+<<<<<<< HEAD
     matlab_cmd = mlpr.ShellScript(cmd,script_path=tmpdir+'/run_kilosort.m',keep_temp_files=True)
     matlab_cmd.write();
     shell_cmd = '''
@@ -185,11 +198,24 @@ quit(0);
     '''.format(tmpdir=tmpdir,lf=logfilename)
     shell_cmd = mlpr.ShellScript(shell_cmd, script_path=tmpdir+'/run_kilosort.sh', keep_temp_files=True)
     shell_cmd.write(tmpdir+'/run_kilosort.sh')
+=======
+    matlab_cmd = mlpr.ShellScript(cmd,script_path=tmpdir+'/run_kilosort2.m',keep_temp_files=True)
+    matlab_cmd.write()
+    shell_cmd = '''
+        #!/bin/bash
+        cd {tmpdir}
+        echo '=====================' `date` '=====================' >> run_kilosort2.log 
+        matlab -nosplash -nodisplay -r run_kilosort2 &>> run_kilosort2.log
+    '''.format(tmpdir=tmpdir)
+    shell_cmd = mlpr.ShellScript(shell_cmd, script_path=tmpdir+'/run_kilosort2.sh', keep_temp_files=True)
+    shell_cmd.write(tmpdir+'/run_kilosort2.sh')
+>>>>>>> ae3bd560760d331bf0cd4bbf16f0b9be656abe61
     shell_cmd.start()
     retcode = shell_cmd.wait()
 
     if retcode != 0:
         raise Exception('kilosort2 returned a non-zero exit code')
+            
 
     # parse output
     result_fname = tmpdir+'/firings.mda'
