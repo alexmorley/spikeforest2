@@ -213,7 +213,6 @@ def get_spikeforest_view_launchers(context):
             enabled=(sorting_result_context.currentUnitId() is not None)
         ))
     
-    
     return ret
 
 class ConsoleOutView(vd.Component):

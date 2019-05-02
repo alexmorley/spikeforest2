@@ -6,7 +6,7 @@ import os
 import time
 
 class ShellScript():
-    def __init__(self, script, script_path=None, keep_temp_files=False):
+    def __init__(self, script, script_path=None, log_path=None, keep_temp_files=False):
         lines = script.splitlines()
         lines = self._remove_initial_blank_lines(lines)
         if len(lines) > 0:
@@ -25,6 +25,7 @@ class ShellScript():
         self._files_to_remove = []
         self._dirs_to_remove = []
         self._start_time = None
+        self._log_path = log_path
         
     def __del__(self):
         self.cleanup()
@@ -53,13 +54,17 @@ class ShellScript():
         cmd = script_path
         print('RUNNING SHELL SCRIPT: ' + cmd)
         self._start_time = time.time()
-        self._process = subprocess.Popen(cmd)
+        if self.log_path is not None:
+            self._log_file = open(log_path, 'a')
+        self._process = subprocess.Popen(cmd, stdout=self._log_file, stderr=self._log_file)
         
     def wait(self, timeout=None):
         if not self.isRunning():
+            self._log_file.close()
             return self.returnCode()
         try:
             retcode = self._process.wait(timeout=timeout)
+            self._log_file.close()
             return retcode
         except:
             return None

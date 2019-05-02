@@ -81,13 +81,13 @@ class MountainJob():
         self._store_result_in_cache(result)
 
     @mtlogging.log(name='MountainJob:execute')
-    def execute(self):
+    def execute(self,keep_temp_files=False):
         if self._job_object is None:
             return MountainJobResult()
         container = self._job_object['container']
         force_run = self._job_object['force_run']
         use_cache = self._job_object['use_cache']
-        keep_temp_files = self._job_object['keep_temp_files']
+        keep_temp_files = keep_temp_files #self._job_object['keep_temp_files']
         job_timeout = self._job_object.get('timeout', None)
         label = self._job_object.get('label', '')
         ignore_local_cache = (os.environ.get('MLPROCESSORS_IGNORE_LOCAL_CACHE', 'FALSE') == 'TRUE')
