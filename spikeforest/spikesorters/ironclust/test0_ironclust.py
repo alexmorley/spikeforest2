@@ -8,13 +8,13 @@ except:
     pass
 
 # %% python magic
-#get_ipython().run_line_magic('load_ext', 'autoreload')
-#get_ipython().run_line_magic('autoreload', '2')
+# get_ipython().run_line_magic('load_ext', 'autoreload')
+# get_ipython().run_line_magic('autoreload', '2')
 
 # %%
 import spikeforest_analysis as sa
 from spikeforest_analysis.compare_sortings_with_truth import GenSortingComparisonTable
-#from mountaintools import client as ca
+# from mountaintools import client as ca
 import spikeextractors as se
 from spikeforest import SFMdaRecordingExtractor, SFMdaSortingExtractor, example_datasets
 import os
@@ -31,11 +31,11 @@ rx, sx = example_datasets.yass_example(set_id=1) """
 
 # %%
 recording_path = 'kbucket://15734439d8cf/groundtruth/visapy_mea/set1'
-firings_true = recording_path+'/firings_true.mda'
-#recording_path = recording_path+'/recording'
-# SFMdaRecordingExtractor.writeRecording(
+firings_true = recording_path + '/firings_true.mda'
+# recording_path = recording_path+'/recording'
+# SFMdaRecordingExtractor.write_recording(
 # recording=rx, save_path=recording_path)
-# SFMdaSortingExtractor.writeSorting(
+# SFMdaSortingExtractor.write_sorting(
 # sorting=sx, save_path=firings_true)
 result_path = os.path.abspath('test_irc')
 if not os.path.exists(result_path):

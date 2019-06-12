@@ -1,10 +1,10 @@
 ---
 # This is YAML front matter
-label: SPF_PAIRED_CRCNS_HC1
+label: PAIRED_CRCNS_HC1
 electrode_type:
   - tetrode
   - silicon-probe
-doi: TODO
+doi: 10.1152/jn.2000.84.1.401
 ground_truth: intracellular
 organism: rat
 source: Buzsaki lab
@@ -12,7 +12,7 @@ labels:
   - in-vivo
 ---
 
-# SPF_PAIRED_CRCNS_HC1
+# PAIRED_CRCNS_HC1
 - Data download from [crcns.org website](http://crcns.org/data-sets/hc/hc-1/about/?searchterm=download)
 - Raw recordings were curated by James Jun 
 - Intracellular timing was determined by threshold crossing of a differentiated intracellular trace (10 SNR).

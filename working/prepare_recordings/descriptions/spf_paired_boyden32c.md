@@ -1,7 +1,7 @@
 ---
 # This is YAML front matter
-label: SPF_PAIRED_BOYDEN
-electrode_type: silicon_probe
+label: PAIRED_BOYDEN
+electrode_type: silicon-probe
 doi: 10.1152/jn.00650.2017
 ground_truth: intracellular
 organism: mouse
@@ -10,7 +10,7 @@ labels:
   - in-vivo
 ---
 
-# SPF_PAIRED_BOYDEN
+# PAIRED_BOYDEN
 
 This dataset was collected by Brian D. Allen from Ed Boyden's lab. The intracellular and extracellular voltages were recorded simultaneously.
 Extracellular voltages were recorded using 128 or 256 site silicon probes custom made at Boyden lab (9x9 um site dimension, 11x11 um site pitch).
@@ -53,3 +53,6 @@ Neuron  Condition                       Filename        Target Layer    Mean uV 
 915_17  anesth. gratings                915_17_1        II/III  57      128
 915_18  anesth. gratings                915_18_1        II/III  64      128
 ```
+
+## References
+https://www.physiology.org/doi/10.1152/jn.00650.2017

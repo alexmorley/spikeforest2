@@ -13,27 +13,43 @@ import spikeextractors as se
 from spikeforest import SFMdaRecordingExtractor, SFMdaSortingExtractor
 import sys
 import shlex
-#import h5py
+import traceback
+from .install_kilosort import install_kilosort
 
 
 class KiloSort(mlpr.Processor):
+    """
+    Kilosort wrapper for SpikeForest framework
+      written by J. James Jun, May 21, 2019
+
+    [Prerequisite]
+    1. MATLAB (Tested on R2018b)
+    2. CUDA Toolkit v9.1 (module load cuda/9.1.85)
+    3. GCC 6.4.0 (module load gcc/6.4.0)
+
+    [Optional: Installation instruction in SpikeForest environment]
+    1. Run `git clone https://github.com/cortex-lab/KiloSort.git`
+    3. In Matlab, run `CUDA/mexGPUall` to compile all CUDA codes
+    4. Add `KILOSORT_PATH_DEV=...` in your .bashrc file.
+    """
+
     NAME = 'KiloSort'
-    VERSION = '0.2.0'  # wrapper VERSION
+    VERSION = '0.2.3'  # wrapper VERSION
     ADDITIONAL_FILES = ['*.m']
     ENVIRONMENT_VARIABLES = [
         'NUM_WORKERS', 'MKL_NUM_THREADS', 'NUMEXPR_NUM_THREADS', 'OMP_NUM_THREADS']
     CONTAINER = None
-    CONTAINER_SHARE_ID = None
+    LOCAL_MODULES = ['../../spikeforest']
 
     recording_dir = mlpr.Input('Directory of recording', directory=True)
     channels = mlpr.IntegerListParameter(
         description='List of channels to use.', optional=True, default=[])
     firings_out = mlpr.Output('Output firings file')
 
-    detect_sign = mlpr.IntegerParameter(
-        'Use -1 or 1, depending on the sign of the spikes in the recording')
-    adjacency_radius = mlpr.FloatParameter(
-        'Use -1 to include all channels in every neighborhood')
+    detect_sign = mlpr.IntegerParameter(optional=True, default=-1,
+                                        description='Use -1 or 1, depending on the sign of the spikes in the recording')
+    adjacency_radius = mlpr.FloatParameter(optional=True, default=-1,
+                                           description='Currently unused')
     detect_threshold = mlpr.FloatParameter(
         optional=True, default=3, description='')
     # prm_template_name=mlpr.StringParameter(optional=False,description='TODO')
@@ -46,11 +62,19 @@ class KiloSort(mlpr.Processor):
     pc_per_chan = mlpr.IntegerParameter(
         optional=True, default=3, description='TODO')
 
+    @staticmethod
+    def install():
+        print('Auto-installing kilosort.')
+        return install_kilosort(
+            repo='https://github.com/cortex-lab/KiloSort.git',
+            commit='3f33771f8fdf8c3846a7f8a75cc8c318b44ed48c'
+        )
+
     def run(self):
         keep_temp_files = False
         code = ''.join(random.choice(string.ascii_uppercase)
                        for x in range(10))
-        tmpdir = os.environ.get('TEMPDIR', '/tmp')+'/kilosort-tmp-'+code
+        tmpdir = os.environ.get('TEMPDIR', '/tmp') + '/kilosort-tmp-' + code
 
         try:
             recording = SFMdaRecordingExtractor(self.recording_dir)
@@ -70,14 +94,14 @@ class KiloSort(mlpr.Processor):
                 freq_max=self.freq_max,
                 pc_per_chan=self.pc_per_chan
             )
-            SFMdaSortingExtractor.writeSorting(
+            SFMdaSortingExtractor.write_sorting(
                 sorting=sorting, save_path=self.firings_out)
         except:
             if os.path.exists(tmpdir):
                 if not keep_temp_files:
                     shutil.rmtree(tmpdir)
             raise
-        if not keep_temp_files:
+        if not getattr(self, '_keep_temp_files', False):
             shutil.rmtree(tmpdir)
 
 
@@ -91,35 +115,32 @@ def kilosort_helper(*,
                     freq_min=300,  # Lower frequency limit for band-pass filter
                     freq_max=6000,  # Upper frequency limit for band-pass filter
                     pc_per_chan=3,  # Number of pc per channel
-                    KILOSORT_PATH=None,  # github kilosort
-                    IRONCLUST_PATH=None  # github ironclust
                     ):
-    if KILOSORT_PATH is None:
-        KILOSORT_PATH = os.getenv('KILOSORT_PATH', None)
-    if not KILOSORT_PATH:
-        raise Exception(
-            'You must either set the KILOSORT_PATH environment variable, or pass the KILOSORT_PATH parameter')
-
-    if IRONCLUST_PATH is None:
-        IRONCLUST_PATH = os.getenv('IRONCLUST_PATH', None)
-    if not IRONCLUST_PATH:
-        raise Exception(
-            'You must either set the IRONCLUST_PATH environment variable, or pass the IRONCLUST_PATH parameter')
+    kilosort_path = os.environ.get('KILOSORT_PATH_DEV', None)
+    if kilosort_path:
+        print('Using kilosort from KILOSORT_PATH_DEV directory: {}'.format(kilosort_path))
+    else:
+        try:
+            kilosort_path = KiloSort.install()
+        except:
+            traceback.print_exc()
+            raise Exception('Problem installing kilosort. You can set the KILOSORT_PATH_DEV to force to use a particular path.')
+    print('Using kilosort from: {}'.format(kilosort_path))
 
     source_dir = os.path.dirname(os.path.realpath(__file__))
 
-    dataset_dir = tmpdir+'/kilosort_dataset'
+    dataset_dir = tmpdir + '/kilosort_dataset'
     # Generate three files in the dataset directory: raw.mda, geom.csv, params.json
-    SFMdaRecordingExtractor.writeRecording(
-        recording=recording, save_path=dataset_dir)
+    SFMdaRecordingExtractor.write_recording(
+        recording=recording, save_path=dataset_dir, _preserve_dtype=True)
 
-    samplerate = recording.getSamplingFrequency()
+    samplerate = recording.get_sampling_frequency()
 
     print('Reading timeseries header...')
-    HH = mdaio.readmda_header(dataset_dir+'/raw.mda')
+    HH = mdaio.readmda_header(dataset_dir + '/raw.mda')
     num_channels = HH.dims[0]
     num_timepoints = HH.dims[1]
-    duration_minutes = num_timepoints/samplerate/60
+    duration_minutes = num_timepoints / samplerate / 60
     print('Num. channels = {}, Num. timepoints = {}, duration = {} minutes'.format(
         num_channels, num_timepoints, duration_minutes))
 
@@ -133,31 +154,32 @@ def kilosort_helper(*,
     txt += 'freq_min={}\n'.format(freq_min)
     txt += 'freq_max={}\n'.format(freq_max)
     txt += 'pc_per_chan={}\n'.format(pc_per_chan)
-    _write_text_file(dataset_dir+'/argfile.txt', txt)
+    _write_text_file(dataset_dir + '/argfile.txt', txt)
 
     print('Running kilosort in {tmpdir}...'.format(tmpdir=tmpdir))
     cmd = '''
-addpath('{source_dir}');
-try
-    p_kilosort('{ksort}', '{iclust}', '{tmpdir}', '{raw}', '{geom}', '{firings}', '{arg}');
-catch
-    quit(1);
-end
-quit(0);
+        addpath('{source_dir}');
+        addpath('{source_dir}/mdaio')
+        try
+            p_kilosort('{ksort}', '{tmpdir}', '{raw}', '{geom}', '{firings}', '{arg}');
+        catch
+            quit(1);
+        end
+        quit(0);
         '''
-    cmd = cmd.format(source_dir=source_dir, ksort=KILOSORT_PATH, iclust=IRONCLUST_PATH, \
-            tmpdir=tmpdir, raw=dataset_dir+'/raw.mda', geom=dataset_dir+'/geom.csv', \
-            firings=tmpdir+'/firings.mda', arg=dataset_dir+'/argfile.txt')
-    matlab_cmd = mlpr.ShellScript(cmd,script_path=tmpdir+'/run_kilosort.m',keep_temp_files=True)
+    cmd = cmd.format(source_dir=source_dir, ksort=kilosort_path,
+                     tmpdir=tmpdir, raw=dataset_dir + '/raw.mda', geom=dataset_dir + '/geom.csv',
+                     firings=tmpdir + '/firings.mda', arg=dataset_dir + '/argfile.txt')
+    matlab_cmd = mlpr.ShellScript(cmd, script_path=tmpdir + '/run_kilosort.m', keep_temp_files=True)
     matlab_cmd.write()
     shell_cmd = '''
         #!/bin/bash
         cd {tmpdir}
-        echo '=====================' `date` '=====================' >> run_kilosort.log 
-        matlab -nosplash -nodisplay -r run_kilosort &>> run_kilosort.log
+        echo '=====================' `date` '====================='
+        matlab -nosplash -nodisplay -r run_kilosort
     '''.format(tmpdir=tmpdir)
-    shell_cmd = mlpr.ShellScript(shell_cmd, script_path=tmpdir+'/run_kilosort.sh', keep_temp_files=True)
-    shell_cmd.write(tmpdir+'/run_kilosort.sh')
+    shell_cmd = mlpr.ShellScript(shell_cmd, script_path=tmpdir + '/run_kilosort.sh', keep_temp_files=True)
+    shell_cmd.write(tmpdir + '/run_kilosort.sh')
     shell_cmd.start()
     retcode = shell_cmd.wait()
 
@@ -165,13 +187,13 @@ quit(0);
         raise Exception('kilosort returned a non-zero exit code')
 
     # parse output
-    result_fname = tmpdir+'/firings.mda'
+    result_fname = tmpdir + '/firings.mda'
     if not os.path.exists(result_fname):
         raise Exception('Result file does not exist: ' + result_fname)
 
     firings = mdaio.readmda(result_fname)
     sorting = se.NumpySortingExtractor()
-    sorting.setTimesLabels(firings[1, :], firings[2, :])
+    sorting.set_times_labels(firings[1, :], firings[2, :])
     return sorting
 
 
@@ -183,4 +205,3 @@ def _read_text_file(fname):
 def _write_text_file(fname, str):
     with open(fname, 'w') as f:
         f.write(str)
-

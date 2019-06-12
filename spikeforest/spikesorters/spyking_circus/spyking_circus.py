@@ -13,14 +13,15 @@ from .tools import saveProbeFile
 from spikeforest import SFMdaRecordingExtractor, SFMdaSortingExtractor
 from .spykingcircussortingextractor import SpykingCircusSortingExtractor
 
+
 class SpykingCircus(mlpr.Processor):
     NAME = 'SpykingCircus'
-    VERSION = '0.2.2'
+    VERSION = '0.2.3'
     ENVIRONMENT_VARIABLES = [
         'NUM_WORKERS', 'MKL_NUM_THREADS', 'NUMEXPR_NUM_THREADS', 'OMP_NUM_THREADS']
     ADDITIONAL_FILES = ['*.params']
-    CONTAINER = 'sha1://8daaf751fc3f40dd6f86696e8fcb675bcf1ba212/03-29-2019/spyking_circus.simg'
-    # CONTAINER_SHARE_ID = '69432e9201d0'  # place to look for container
+    CONTAINER = 'sha1://8958530b960522d529163344af2faa09ea805716/2019-05-06/spyking_circus.simg'
+    LOCAL_MODULES = ['../../spikeforest']
 
     recording_dir = mlpr.Input('Directory of recording', directory=True)
     channels = mlpr.IntegerListParameter(
@@ -41,11 +42,8 @@ class SpykingCircus(mlpr.Processor):
         optional=True, default=10000, description='I believe it relates to subsampling and affects compute time')
 
     def run(self):
-        code = ''.join(random.choice(string.ascii_uppercase)
-                       for x in range(10))
-        tmpdir = os.environ.get('TEMPDIR', '/tmp')+'/spyking-circus-tmp-'+code
-
-        num_workers = os.environ.get('NUM_WORKERS', 1)
+        tmpdir = _get_tmpdir('spiking-circus')
+        num_workers = int(os.environ.get('NUM_WORKERS', 1))
 
         try:
             recording = SFMdaRecordingExtractor(self.recording_dir)
@@ -70,7 +68,7 @@ class SpykingCircus(mlpr.Processor):
                 whitening_max_elts=self.whitening_max_elts,
                 clustering_max_elts=self.clustering_max_elts,
             )
-            SFMdaSortingExtractor.writeSorting(
+            SFMdaSortingExtractor.write_sorting(
                 sorting=sorting, save_path=self.firings_out)
         except:
             if not getattr(self, '_keep_temp_files', False):
@@ -96,19 +94,17 @@ def spyking_circus(
     electrode_dimensions=None,
     whitening_max_elts=1000,  # I believe it relates to subsampling and affects compute time
     # I believe it relates to subsampling and affects compute time
-    clustering_max_elts=10000,
-    singularity_container=None
+    clustering_max_elts=10000
 ):
-    if not singularity_container:
-        try:
-            import circus # pylint: disable=import-error
-        except ModuleNotFoundError:
-            raise ModuleNotFoundError("\nTo use Spyking-Circus, install spyking-circus: \n\n"
-                                      "\npip install spyking-circus"
-                                      "\nfor ubuntu install openmpi: "
-                                      "\nsudo apt install libopenmpi-dev"
-                                      "\nMore information on Spyking-Circus at: "
-                                      "\nhttps://spyking-circus.readthedocs.io/en/latest/")
+    try:
+        import circus  # pylint: disable=import-error
+    except ModuleNotFoundError:
+        raise ModuleNotFoundError("\nTo use Spyking-Circus, install spyking-circus: \n\n"
+                                  "\npip install spyking-circus"
+                                  "\nfor ubuntu install openmpi: "
+                                  "\nsudo apt install libopenmpi-dev"
+                                  "\nMore information on Spyking-Circus at: "
+                                  "\nhttps://spyking-circus.readthedocs.io/en/latest/")
     source_dir = os.path.dirname(os.path.realpath(__file__))
 
     if output_folder is None:
@@ -123,15 +119,16 @@ def spyking_circus(
     # save prb file:
     if probe_file is None:
         saveProbeFile(recording, join(output_folder, 'probe.prb'), format='spyking_circus', radius=adjacency_radius,
-                         dimensions=electrode_dimensions)
+                      dimensions=electrode_dimensions)
         probe_file = join(output_folder, 'probe.prb')
     # save binary file
     if file_name is None:
         file_name = 'recording'
     elif file_name.endswith('.npy'):
         file_name = file_name[file_name.find('.npy')]
+    raw = recording.get_traces()
     np.save(join(output_folder, file_name),
-            recording.getTraces().astype('float32', order='F'))
+            raw.astype(raw.dtype, order='F'))
 
     if detect_sign < 0:
         detect_sign = 'negative'
@@ -148,7 +145,7 @@ def spyking_circus(
     else:
         auto = 0
     circus_config = circus_config.format(
-        float(recording.getSamplingFrequency()
+        float(recording.get_sampling_frequency()
               ), probe_file, template_width_ms, spike_thresh, detect_sign, filter,
         whitening_max_elts, clustering_max_elts, auto
     )
@@ -163,26 +160,19 @@ def spyking_circus(
     print('Running spyking circus...')
     t_start_proc = time.time()
     if n_cores is None:
-        n_cores = np.maximum(1, int(os.cpu_count()/2))
+        n_cores = np.maximum(1, int(os.cpu_count() / 2))
 
     output_folder_cmd = output_folder
-    if singularity_container:
-        output_folder_cmd = '/output_folder'
 
     num_cores_str = ''
     if int(n_cores) > 1:
         num_cores_str = '-c {}'.format(n_cores)
     cmd = 'spyking-circus {} {} '.format(
-        join(output_folder_cmd, file_name+'.npy'), num_cores_str)
+        join(output_folder_cmd, file_name + '.npy'), num_cores_str)
 
     # I think the merging step requires a gui and some user interaction. TODO: inquire about this
     # cmd_merge = 'spyking-circus {} -m merging {} '.format(join(output_folder_cmd, file_name+'.npy'), num_cores_str)
     # cmd_convert = 'spyking-circus {} -m converting'.format(join(output_folder, file_name+'.npy'))
-
-    if singularity_container:
-        cmd = 'singularity exec --contain -e -B {}:{} -B /tmp:/tmp {} bash -c "{}"'.format(
-            output_folder, output_folder_cmd, singularity_container, cmd)
-        # cmd_merge='singularity exec --contain -e -B {}:{} -B /tmp:/tmp {} bash -c "{}"'.format(output_folder,output_folder_cmd,singularity_container,cmd_merge)
 
     retcode = run_command_and_print_output(cmd)
     if retcode != 0:
@@ -198,8 +188,21 @@ def spyking_circus(
     return sorting
 
 
+# To be shared across sorters (2019.05.05)
+def _get_tmpdir(sorter_name):
+    code = ''.join(random.choice(string.ascii_uppercase) for x in range(10))
+    tmpdir0 = os.environ.get('TEMPDIR', '/tmp')
+    tmpdir = os.path.join(tmpdir0, '{}-tmp-{}'.format(sorter_name, code))
+    # reset the output folder
+    if os.path.exists(tmpdir):
+        shutil.rmtree(str(tmpdir))
+    else:
+        os.makedirs(tmpdir)
+    return tmpdir
+
+
 def run_command_and_print_output(command):
-    print('RUNNING: '+command)
+    print('RUNNING: ' + command)
     with Popen(shlex.split(command), stdout=PIPE, stderr=PIPE) as process:
         while True:
             output_stdout = process.stdout.readline()

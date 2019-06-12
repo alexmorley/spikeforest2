@@ -3,9 +3,11 @@
 Here we provide instructions for running the SpikeForest analysis from start to finish.
 
 ## Step 0. Configure security tokens to connect to the SpikeForest storage system (kbucket)
-You need to add two key files containing security tokens. Contact Jeremy Magland to acquire tokens.
-- Create a file `~/.mountaintools/kachery_upload_tokens`
-  - Add a line `spikeforest.kbucket XXXXXX`
+You need to add two key files containing security tokens. Contact Jeremy Magland to obtain tokens.
+- Create a file `~/.mountaintools/kachery_tokens`
+  - Add a line `spikeforest.kbucket upload XXXX`
+  - Add a line `spikeforest.kbucket download YYYY`
+  - Add a line `spikeforest.public upload XXXX`
   
 - Create a file `~/.mountaintools/pairio_tokens`
   - Add a line `spikeforest XXXXXX`
@@ -32,6 +34,8 @@ You can then view these recordings (from any computer) using ForestView
 forestview key://pairio/spikeforest/spikeforest_recording_group.visapy_synth.json
 ```
 
+To prepare all, run `./prepare_all.sh`
+
 ## Step 2. Run the main analysis
 
 The SpikeForest processing is split into multiple `analysis.*.json` files found in the `working/main_analysis` directory. These files specify the input files (recordings prepared above), the spike sorters and parameters to run, compute resources to use, and where to put the output. For example, to run the visapy_synth analysis (authorization is required):
@@ -47,16 +51,18 @@ If successful, the results of this analysis can be viewed (from any computer) us
 forestview key://pairio/spikeforest/spikeforest_analysis_results.visapy_synth.json
 ```
 
+To run all, see the `run_all_*.sh` scripts.
+
 ## Step 3. Assemble data for the website
 
-Scripts for preparing the data for the website are found in the `working/website` directory. To prepare data prior to loading into the website's database, run the following script:
+Scripts for preparing the data for the website are found in the `working/website` directory. To prepare data prior to loading into the website's database, run the following script after removing the website_data directory:
 
 ```
 cd working/website
-./assemble_website_data.py --output_dir website_data --output_ids [comma-separated-list-of-output-ids]
+./do_assemble_website_data.sh
 ```
 
-For example, to only import the visapy_synth data, just use `visapy_synth` for the output IDs. This will save .json files into the `website_data/` directory.
+It is also possible to assemble only a portion of the data. See the `--help` for the `assemble_website_data.py` script.
 
 ## Step 4. Load data into website database
 
@@ -78,3 +84,9 @@ cd spike-front
 DATBASE=mongodb://localhost:27017/spikefront yarn dev
 ```
 
+Similarly, to upload the the data to the remote database, you can run the following command after setting up the proper admin tokens:
+
+```
+cd working/website
+./load_data_into_remote_database.sh website_data
+```

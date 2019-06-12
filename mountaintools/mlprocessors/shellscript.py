@@ -5,6 +5,7 @@ import signal
 import os
 import time
 
+
 class ShellScript():
     def __init__(self, script, script_path=None, log_path=None, keep_temp_files=False):
         lines = script.splitlines()
@@ -26,13 +27,13 @@ class ShellScript():
         self._dirs_to_remove = []
         self._start_time = None
         self._log_path = log_path
-        
+
     def __del__(self):
         self.cleanup()
-        
+
     def substitute(self, old, new):
-        self._script = self._script.replace(old, new)
-        
+        self._script = self._script.replace(old, '{}'.format(new))
+
     def write(self, script_path=None):
         if script_path is None:
             script_path = self._script_path
@@ -41,7 +42,7 @@ class ShellScript():
         with open(script_path, 'w') as f:
             f.write(self._script)
         os.chmod(script_path, 0o744)
-        
+
     def start(self):
         script_path = self._script_path
         if self._script_path is not None:
@@ -56,8 +57,10 @@ class ShellScript():
         self._start_time = time.time()
         if self.log_path is not None:
             self._log_file = open(log_path, 'a')
+        else:
+            self._log_file = None
         self._process = subprocess.Popen(cmd, stdout=self._log_file, stderr=self._log_file)
-        
+
     def wait(self, timeout=None):
         if not self.isRunning():
             self._log_file.close()
@@ -68,32 +71,52 @@ class ShellScript():
             return retcode
         except:
             return None
-            
+
     def cleanup(self):
         if self._keep_temp_files:
             return
         for dirpath in self._dirs_to_remove:
             shutil.rmtree(dirpath)
-            
+
     def stop(self):
         if not self.isRunning():
             return
-        
-        signals = [signal.SIGINT]*10 + [signal.SIGTERM]*10 + [signal.SIGKILL]*10
-        
+
+        signals = [signal.SIGINT] * 10 + [signal.SIGTERM] * 10 + [signal.SIGKILL] * 10
+
         for signal0 in signals:
             self._process.send_signal(signal0)
             try:
-                self._process.wait(timeout=0.1)
+                self._process.wait(timeout=0.02)
                 return
             except:
                 pass
-            
+
+    def kill(self):
+        if not self.isRunning():
+            return
+        self._process.send_signal(signal.SIGKILL)
+        try:
+            self._process.wait(timeout=1)
+        except:
+            print('WARNING: unable to kill shell script.')
+            pass
+
+    def stopWithSignal(self, sig, timeout):
+        if not self.isRunning():
+            return
+        self._process.send_signal(sig)
+        try:
+            self._process.wait(timeout=timeout)
+            return True
+        except:
+            return False
+
     def elapsedTimeSinceStart(self):
         if self._start_time is None:
             return
         return time.time() - self._start_time
-        
+
     def isRunning(self):
         if not self._process:
             return False
@@ -101,12 +124,12 @@ class ShellScript():
         if retcode is None:
             return True
         return False
-    
+
     def isFinished(self):
         if not self._process:
             return False
         return not self.isRunning()
-    
+
     def returnCode(self):
         if not self.isFinished():
             raise Exception('Cannot get return code before process is finished.')
@@ -114,13 +137,13 @@ class ShellScript():
 
     def scriptPath(self):
         return self._script_path
-    
+
     def _remove_initial_blank_lines(self, lines):
-        ii=0
+        ii = 0
         while ii < len(lines) and len(lines[ii].strip()) == 0:
             ii = ii + 1
         return lines[ii:]
-    
+
     def _get_num_initial_spaces(self, line):
         ii = 0
         while ii < len(line) and line[ii] == ' ':

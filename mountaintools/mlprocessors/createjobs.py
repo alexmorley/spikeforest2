@@ -4,11 +4,11 @@ import fnmatch
 from mountainclient import MountainClient
 from .mountainjob import MountainJob
 import json
-import hashlib
 import inspect
 import multiprocessing
 
 local_client = MountainClient()
+
 
 @mtlogging.log()
 def createJobs(proc, argslist, verbose=None):
@@ -18,7 +18,7 @@ def createJobs(proc, argslist, verbose=None):
     try:
         processor_source_fname = os.path.abspath(inspect.getsourcefile(proc))
     except:
-        print('Warning: Unable to get source file for processor {}. You will not be able to run this on a compute resource.'.format(proc.NAME))
+        print('Warning: Unable to get source file for processor {}. You will not be able to run this on a compute resource or in a container.'.format(proc.NAME))
         processor_source_fname = None
     if processor_source_fname is not None:
         processor_source_dirname = os.path.dirname(processor_source_fname)
@@ -34,7 +34,21 @@ def createJobs(proc, argslist, verbose=None):
             content='from .{} import {}'.format(
                 processor_source_basename_noext, proc.__name__)
         ))
-        code = local_client.saveObject(object = code)
+        if hasattr(proc, 'LOCAL_MODULES'):
+            code['dirs'].append(dict(
+                name='_local_modules',
+                content=dict(
+                    files=[],
+                    dirs=[
+                        dict(
+                            name=os.path.basename(local_module_path),
+                            content=_read_python_code_of_directory(os.path.join(processor_source_dirname, local_module_path), exclude_init=False)
+                        )
+                        for local_module_path in proc.LOCAL_MODULES
+                    ]
+                )
+            ))
+        code = local_client.saveObject(object=code)
     else:
         code = None
 
@@ -44,12 +58,21 @@ def createJobs(proc, argslist, verbose=None):
         _keep_temp_files = args.get('_keep_temp_files', None)
         _container = args.get('_container', None)
         _label = args.get('_label', None)
+        _compute_requirements = args.get('_compute_requirements', None)
         _use_cache = args.get('_use_cache', True)
+        _skip_failing = args.get('_skip_failing', None)
+        _skip_timed_out = args.get('_skip_timed_out', None)
         _timeout = args.get('_timeout', None)
         _additional_files_to_realize = args.get('_additional_files_to_realize', None)
 
         if _force_run is None:
             _force_run = (os.environ.get('MLPROCESSORS_FORCE_RUN', '') == 'TRUE')
+
+        if _skip_failing is None:
+            _skip_failing = (os.environ.get('MLPROCESSORS_SKIP_FAILING', '') == 'TRUE')
+
+        if _skip_timed_out is None:
+            _skip_timed_out = (os.environ.get('MLPROCESSORS_SKIP_TIMED_OUT', '') == 'TRUE')
 
         if _keep_temp_files is None:
             _keep_temp_files = (os.environ.get('MLPROCESSORS_KEEP_TEMP_FILES', '') == 'TRUE')
@@ -60,10 +83,13 @@ def createJobs(proc, argslist, verbose=None):
 
         if _container:
             if not _file_exists_or_is_sha1_url(_container):
-                raise Exception('Unable to find container file: '+_container)
-        
+                raise Exception('Unable to find container file: ' + _container)
+
         if _label is None:
-            _label='{} (version: {})'.format(proc.NAME, proc.VERSION)
+            _label = '{} (version: {})'.format(proc.NAME, proc.VERSION)
+
+        if _compute_requirements is None:
+            _compute_requirements = dict()
 
         # hashes for inputs are computed below
         inputs = dict()
@@ -73,31 +99,73 @@ def createJobs(proc, argslist, verbose=None):
                 fname0 = args[name0]
                 if input0.directory:
                     inputs[name0] = dict(
-                        directory = True,
-                        path = fname0
+                        directory=True,
+                        path=fname0
                     )
                 else:
                     if type(fname0) == str:
                         inputs[name0] = dict(
-                            path = fname0
+                            path=fname0
                         )
+                    elif type(fname0) == list:
+                        inputs[name0] = []
+                        for a in fname0:
+                            if type(a) == str:
+                                inputs[name0].append(dict(
+                                    path=a
+                                ))
+                            elif (type(a) == dict) and ('hash' in a):
+                                inputs[name0].append(dict(
+                                    path=None,
+                                    object=a,
+                                    hash=a['hash']
+                                ))
+                            elif hasattr(a, 'hash'):
+                                if callable(a.hash):
+                                    hash0 = a.hash()
+                                else:
+                                    hash0 = a.hash
+                                inputs[name0].append(dict(
+                                    path=None,
+                                    object=a,
+                                    hash=hash0
+                                ))
+                            elif a.get('pending', False):
+                                inputs[name0].append(dict(
+                                    object=a,
+                                    pending=True
+                                ))
+                            else:
+                                raise Exception('Input {} is a list and one of the members is not a string and is not pending.'.format(name0))
                     else:
-                        if not hasattr(fname0, 'hash'):
-                            raise Exception('Input {} is not a string and does not have hash attribute.'.format(name0))
-                        if callable(fname0.hash):
-                            hash0 = fname0.hash()
+                        if (type(fname0) == dict) and ('hash' in fname0):
+                            inputs[name0] = dict(
+                                path=None,
+                                object=fname0,
+                                hash=fname0['hash']
+                            )
+                        elif hasattr(fname0, 'hash'):
+                            if callable(fname0.hash):
+                                hash0 = fname0.hash()
+                            else:
+                                hash0 = fname0.hash
+                            inputs[name0] = dict(
+                                path=None,
+                                object=fname0,
+                                hash=hash0
+                            )
+                        elif fname0.get('pending', False):
+                            inputs[name0] = dict(
+                                object=fname0,
+                                pending=True
+                            )
                         else:
-                            hash0 = fname0.hash
-                        inputs[name0] = dict(
-                            path = None,
-                            object = fname0,
-                            hash = hash0
-                        )
+                            print(fname0)
+                            raise Exception('Input {} is not a string and is not pending.'.format(name0))
             else:
                 if not input0.optional:
                     raise Exception('Missing required input: {}'.format(name0))
 
-        # signatures for outputs are computed below
         outputs = dict()
         for output0 in proc.OUTPUTS:
             name0 = output0.name
@@ -106,25 +174,30 @@ def createJobs(proc, argslist, verbose=None):
                 if type(val0) == str:
                     _, file_extension = os.path.splitext(val0)
                     outputs[name0] = dict(
-                        ext = file_extension,
-                        dest_path = os.path.abspath(val0)
+                        ext=file_extension,
+                        dest_path=os.path.abspath(val0)
                     )
                 elif type(val0) == dict:
                     outputs[name0] = val0
                 elif type(val0) == bool:
                     if output0.is_array:
                         outputs[name0] = dict(ext='.npy')
+                    elif output0.is_dict:
+                        outputs[name0] = dict(ext='.json')
                     else:
                         outputs[name0] = dict(ext='.dat')
                 else:
                     raise Exception('Type of output {} cannot be {}'.format(name0, str(type(val0))))
                 if output0.is_array:
                     outputs[name0]['is_array'] = True
+                if output0.is_array:
+                    outputs[name0]['is_dict'] = True
             else:
                 if not output0.optional:
                     raise Exception('Missing required output: {}'.format(name0))
 
         parameters = dict()
+        parameters_to_hash = dict()
         for param0 in proc.PARAMETERS:
             name0 = param0.name
             if name0 not in args:
@@ -135,30 +208,34 @@ def createJobs(proc, argslist, verbose=None):
             else:
                 val0 = args[name0]
             parameters[name0] = val0
+            if not param0.environment:
+                parameters_to_hash[name0] = val0
 
         if hasattr(proc, 'ENVIRONMENT_VARIABLES'):
             environment_variables = proc.ENVIRONMENT_VARIABLES
         else:
             environment_variables = []
 
-        job_object=dict(
+        job_object = dict(
             processor_name=proc.NAME,
             processor_version=proc.VERSION,
             processor_class_name=proc.__name__,
             processor_code=code,
             label=_label,
-            inputs=inputs, # hashes are computed below
-            outputs=outputs, # signatures are computed below
+            inputs=inputs,  # hashes are computed below
+            outputs=outputs,
             parameters=parameters,
+            parameters_to_hash=parameters_to_hash,
             container=_container,
-            force_run=_force_run, 
+            compute_requirements=_compute_requirements,
+            force_run=_force_run,
             use_cache=_use_cache,
+            skip_failing=_skip_failing,
+            skip_timed_out=_skip_timed_out,
             keep_temp_files=_keep_temp_files,
             environment_variables=environment_variables,
             additional_files_to_realize=_additional_files_to_realize or [],
-            timeout=_timeout,
-            runtime_info_signature=None, # computed below
-            console_out_signature=None, # computed below
+            timeout=_timeout
         )
         job_objects.append(job_object)
 
@@ -168,21 +245,40 @@ def createJobs(proc, argslist, verbose=None):
     all_sha1_file_inputs = []
     all_local_file_inputs = []
     for job_object in job_objects:
-        for _, input0 in job_object['inputs'].items():
-            path0 = input0.get('path', None)
-            if path0:
-                if input0.get('directory', False):
-                    if path0.startswith('kbucket://') or path0.startswith('sha1dir://'):
-                        all_kbucket_dir_inputs.append(input0)
+        for input_name, input0 in job_object['inputs'].items():
+            if type(input0) == dict:
+                path0 = input0.get('path', None)
+                if path0:
+                    if input0.get('directory', False):
+                        if path0.startswith('kbucket://') or path0.startswith('sha1dir://'):
+                            all_kbucket_dir_inputs.append(input0)
+                        else:
+                            all_local_dir_inputs.append(input0)
                     else:
-                        all_local_dir_inputs.append(input0)
-                else:
-                    if path0.startswith('kbucket://') or path0.startswith('sha1dir://'):
-                        all_kbucket_file_inputs.append(input0)
-                    elif path0.startswith('sha1://'):
-                        all_sha1_file_inputs.append(input0)
-                    else:
-                        all_local_file_inputs.append(input0)
+                        if path0.startswith('kbucket://') or path0.startswith('sha1dir://'):
+                            all_kbucket_file_inputs.append(input0)
+                        elif path0.startswith('sha1://'):
+                            all_sha1_file_inputs.append(input0)
+                        else:
+                            all_local_file_inputs.append(input0)
+            elif type(input0) == list:
+                for a in input0:
+                    path0 = a.get('path', None)
+                    if path0:
+                        if a.get('directory', False):
+                            if path0.startswith('kbucket://') or path0.startswith('sha1dir://'):
+                                all_kbucket_dir_inputs.append(a)
+                            else:
+                                all_local_dir_inputs.append(a)
+                        else:
+                            if path0.startswith('kbucket://') or path0.startswith('sha1dir://'):
+                                all_kbucket_file_inputs.append(a)
+                            elif path0.startswith('sha1://'):
+                                all_sha1_file_inputs.append(a)
+                            else:
+                                all_local_file_inputs.append(a)
+            else:
+                raise Exception('Unexpected type for input {}'.format(input_name))
 
     # Prepare the local file inputs
     if len(all_local_file_inputs) > 0:
@@ -230,41 +326,18 @@ def createJobs(proc, argslist, verbose=None):
             all_kbucket_dir_inputs[ii]['hash'] = hashes[ii]
 
     if verbose:
-        print('Computing output signatures...')
-    mtlogging.sublog('computing-output-signatures')
-    for job_object in job_objects:
-        for output_name, output0 in job_object['outputs'].items():
-            output0['signature'] = _compute_mountain_job_output_signature(
-                processor_name=proc.NAME,
-                processor_version=proc.VERSION,
-                inputs=job_object['inputs'],
-                parameters=job_object['parameters'],
-                output_name=output_name
-            )
-        job_object['runtime_info_signature'] = _compute_mountain_job_output_signature(
-            processor_name=proc.NAME,
-            processor_version=proc.VERSION,
-            inputs=job_object['inputs'],
-            parameters=job_object['parameters'],
-            output_name='--runtime-info--'
-        )
-        job_object['console_out_signature'] = _compute_mountain_job_output_signature(
-            processor_name=proc.NAME,
-            processor_version=proc.VERSION,
-            inputs=job_object['inputs'],
-            parameters=job_object['parameters'],
-            output_name='--console-out--'
-        )
-    if verbose:
         print('.')
 
     return [MountainJob(processor=proc, job_object=job_object) for job_object in job_objects]
+
 
 @mtlogging.log()
 def createJob(
     proc,
     _container=None,
     _use_cache=True,
+    _skip_failing=None,
+    _skip_timed_out=None,
     _force_run=None,
     _keep_temp_files=None,
     _label=None,
@@ -276,6 +349,8 @@ def createJob(
     args = dict(
         _container=_container,
         _use_cache=_use_cache,
+        _skip_failing=_skip_failing,
+        _skip_timed_out=_skip_timed_out,
         _force_run=_force_run,
         _keep_temp_files=_keep_temp_files,
         _label=_label,
@@ -286,12 +361,13 @@ def createJob(
     jobs = createJobs(proc, [args], verbose=_verbose)
     return jobs[0]
 
-def _read_python_code_of_directory(dirname, additional_files=[], exclude_init=True):
-    patterns = ['*.py']+additional_files
+
+def _read_python_code_of_directory(dirname, exclude_init, additional_files=[]):
+    patterns = ['*.py'] + additional_files
     files = []
     dirs = []
     for fname in os.listdir(dirname):
-        if os.path.isfile(dirname+'/'+fname):
+        if os.path.isfile(dirname + '/' + fname):
             matches = False
             for pattern in patterns:
                 if fnmatch.fnmatch(fname, pattern):
@@ -299,17 +375,17 @@ def _read_python_code_of_directory(dirname, additional_files=[], exclude_init=Tr
             if exclude_init and (fname == '__init__.py'):
                 matches = False
             if matches:
-                with open(dirname+'/'+fname) as f:
+                with open(dirname + '/' + fname) as f:
                     txt = f.read()
                 files.append(dict(
                     name=fname,
                     content=txt
                 ))
-        elif os.path.isdir(dirname+'/'+fname):
+        elif os.path.isdir(dirname + '/' + fname):
             if (not fname.startswith('__')) and (not fname.startswith('.')):
                 content = _read_python_code_of_directory(
-                    dirname+'/'+fname, additional_files=additional_files, exclude_init=False)
-                if len(content['files'])+len(content['dirs']) > 0:
+                    dirname + '/' + fname, additional_files=additional_files, exclude_init=False)
+                if len(content['files']) + len(content['dirs']) > 0:
                     dirs.append(dict(
                         name=fname,
                         content=content
@@ -319,30 +395,6 @@ def _read_python_code_of_directory(dirname, additional_files=[], exclude_init=Tr
         dirs=dirs
     )
 
-def _compute_mountain_job_output_signature(*, processor_name, processor_version, inputs, parameters, output_name):
-    input_hashes=dict()
-    for input_name, input0 in inputs.items():
-        if input0.get('directory', False):
-            hash0 = input0.get('hash', None)
-        else:
-            hash0 = input0.get('sha1', input0.get('hash', None))
-        if not hash0:
-            raise Exception('Problem getting sha1 or hash for input: {}'.format(input_name))
-        input_hashes[input_name] = hash0
-
-    signature_obj = dict(
-        processor_name=processor_name,
-        processor_version=processor_version,
-        inputs=input_hashes,
-        parameters=parameters,
-        output_name=output_name
-    )
-    signature_string = json.dumps(signature_obj, sort_keys=True)
-    return _sha1(signature_string)
-        
-def _sha1(str):
-    hash_object = hashlib.sha1(str.encode('utf-8'))
-    return hash_object.hexdigest()
 
 def _file_exists_or_is_sha1_url(fname):
     if fname.startswith('sha1://'):
@@ -350,6 +402,7 @@ def _file_exists_or_is_sha1_url(fname):
     if local_client.findFile(path=fname):
         return True
     return False
+
 
 @mtlogging.log()
 def _compute_sha1s_for_local_file_inputs(inputs):
@@ -362,12 +415,14 @@ def _compute_sha1s_for_local_file_inputs(inputs):
     pool.join()
     return ret
 
+
 def _compute_sha1_for_local_file_input(input0):
     path0 = input0['path']
     if not os.path.exists(path0):
         raise Exception('Input file does not exists: {}'.format(path0))
     sha1 = local_client.computeFileSha1(path0)
     return sha1
+
 
 @mtlogging.log()
 def _compute_sha1s_for_kbucket_file_inputs(inputs):
@@ -380,12 +435,14 @@ def _compute_sha1s_for_kbucket_file_inputs(inputs):
     pool.join()
     return ret
 
+
 def _compute_sha1_for_kbucket_file_input(input0):
     path0 = input0['path']
     sha1 = local_client.computeFileSha1(path0)
     if not sha1:
         raise Exception('Unable to find input: {}'.format(path0))
     return sha1
+
 
 @mtlogging.log()
 def _compute_sha1s_for_sha1_file_inputs(inputs):
@@ -399,6 +456,7 @@ def _compute_sha1s_for_sha1_file_inputs(inputs):
         ret.append(sha1)
     return ret
 
+
 @mtlogging.log()
 def _compute_hashes_for_local_dir_inputs(inputs):
     # do not parallelize if small number
@@ -410,6 +468,7 @@ def _compute_hashes_for_local_dir_inputs(inputs):
     pool.join()
     return ret
 
+
 def _compute_hash_for_local_dir_input(input0):
     path0 = input0['path']
     if not os.path.isdir(path0):
@@ -418,6 +477,7 @@ def _compute_hash_for_local_dir_input(input0):
     if not hash0:
         raise Exception('Unable to compute hash of directory: {}'.format(path0))
     return hash0
+
 
 @mtlogging.log()
 def _compute_hashes_for_kbucket_dir_inputs(inputs):
@@ -429,6 +489,7 @@ def _compute_hashes_for_kbucket_dir_inputs(inputs):
     pool.close()
     pool.join()
     return ret
+
 
 def _compute_hash_for_kbucket_dir_input(input0):
     path0 = input0['path']

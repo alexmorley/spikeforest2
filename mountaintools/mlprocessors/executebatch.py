@@ -9,7 +9,7 @@ from .computeresourceclient import ComputeResourceClient
 from .shellscript import ShellScript
 from .temporarydirectory import TemporaryDirectory
 from .mountainjob import MountainJob
-from .mountainjob import MountainJobResult
+from .mountainjobresult import MountainJobResult
 import mtlogging
 from copy import deepcopy
 
@@ -17,13 +17,14 @@ from copy import deepcopy
 _realized_files = set()
 _compute_resources_config = dict()
 
+
 def configComputeResource(name, *, resource_name, collection=None, kachery_name=None, share_id=None):
     if share_id is not None:
         print('WARNING: use kachery_name in configComputeResource (share_id) is deprecated)')
         assert kachery_name is None
         kachery_name = share_id
     if resource_name is not None:
-        _compute_resources_config[name]=dict(
+        _compute_resources_config[name] = dict(
             resource_name=resource_name,
             collection=collection,
             kachery_name=kachery_name
@@ -31,8 +32,19 @@ def configComputeResource(name, *, resource_name, collection=None, kachery_name=
     else:
         _compute_resources_config[name] = None
 
+
+def configComputeResources(obj):
+    for key, cr in obj.items():
+        configComputeResource(
+            name=key,
+            resource_name=cr.get('resource_name', None),
+            collection=cr.get('collection', None),
+            share_id=cr.get('share_id', None)
+        )
+
+
 @mtlogging.log()
-def executeBatch(*, jobs, label='', num_workers=None, compute_resource=None, halt_key=None, job_status_key=None, job_result_key=None, srun_opts=None, job_index_file=None, cached_results_only=False):
+def executeBatch(*, jobs, label='', num_workers=None, compute_resource=None, halt_key=None, job_status_key=None, job_result_key=None, srun_opts=None, job_index_file=None, cached_results_only=False, download_outputs=True, _job_handler=None):
     all_kwargs = locals()
 
     if len(jobs) == 0:
@@ -57,13 +69,13 @@ def executeBatch(*, jobs, label='', num_workers=None, compute_resource=None, hal
         if job_index_file is not None:
             raise Exception('Cannot specify both srun_opts and job_index_file in executeBatch.')
 
-    if type(compute_resource)==str:
+    if type(compute_resource) == str:
         if compute_resource in _compute_resources_config:
-            compute_resource=_compute_resources_config[compute_resource]
+            compute_resource = _compute_resources_config[compute_resource]
         else:
             raise Exception('No compute resource named {}. Use mlprocessors.configComputeResource("{}",...).'.format(compute_resource, compute_resource))
 
-    if type(compute_resource)==dict:
+    if type(compute_resource) == dict:
         if compute_resource['resource_name'] is None:
             compute_resource = None
 
@@ -77,16 +89,16 @@ def executeBatch(*, jobs, label='', num_workers=None, compute_resource=None, hal
         kwargs0 = all_kwargs
         kwargs0['compute_resource'] = None
         kwargs0['cached_results_only'] = True
-        kwargs0['num_workers'] = 10 # check it in parallel
+        kwargs0['num_workers'] = 10  # check it in parallel
         # kwargs0['num_workers'] = None # for timing, do not check in parallel
         kwargs0['srun_opts'] = None
         results0 = executeBatch(**kwargs0)
         all_complete = True
         num_found = 0
         for ii, job in enumerate(jobs):
-            if results0[ii]:
-                num_found = num_found+1
-                job.result = results0[ii]
+            if results0[ii].retcode is not None:
+                num_found = num_found + 1
+                job.result.fromObject(results0[ii].getObject())
             else:
                 all_complete = False
         if num_found > 0:
@@ -95,11 +107,15 @@ def executeBatch(*, jobs, label='', num_workers=None, compute_resource=None, hal
             return results0
         mtlogging.sublog(None)
 
-    jobs2 = [job for job in jobs if (not job.result)]
+    jobs2 = [job for job in jobs if job.result.retcode is None]
 
     if compute_resource:
         for job in jobs2:
             job.useRemoteUrlsForInputFiles()
+
+    if _job_handler is not None:
+        for job in jobs2:
+            setattr(job, 'job_handler', _job_handler)
 
     files_to_realize = []
     for job in jobs2:
@@ -129,7 +145,7 @@ def executeBatch(*, jobs, label='', num_workers=None, compute_resource=None, hal
         if 'share_id' in args:
             args['kachery_name'] = args['share_id']
             del args['share_id']
-        CRC=ComputeResourceClient(**args)
+        CRC = ComputeResourceClient(**args)
 
         batch_id = CRC.initializeBatch(jobs=jobs2, label=label)
         CRC.startBatch(batch_id=batch_id)
@@ -147,35 +163,34 @@ def executeBatch(*, jobs, label='', num_workers=None, compute_resource=None, hal
         for i, job2 in enumerate(jobs2):
             result0 = results[i]
             if result0:
-                job2.result = result0
+                job2.result.fromObject(result0.getObject())
             else:
                 raise Exception('Unexpected: Unable to find result for job {}'.format(i))
 
         mtlogging.sublog('realizing-outputs')
         # Download outputs to local computer
-        download_from=compute_resource.get('kachery_name', None)
-        for ii, result in enumerate(results):
-            if result and (result.retcode == 0):
-                for output_name, output_path in result.outputs.items():
-                    if not local_client.realizeFile(path=output_path):
-                        print('Downloading output {} {} ...'.format(output_name, output_path))
-                        local_path = mt.realizeFile(path=output_path, download_from=download_from)
+        if download_outputs:
+            download_from = compute_resource.get('kachery_name', None)
+            for ii, result in enumerate(results):
+                if result and (result.retcode == 0):
+                    for output_name, output_path in result.outputs.items():
+                        if not local_client.realizeFile(path=output_path):
+                            print('Downloading output {} {} ...'.format(output_name, output_path))
+                            local_path = mt.realizeFile(path=output_path, download_from=download_from)
+                            if not local_path:
+                                raise Exception('Unable to realize output {} from {}'.format(output_name, output_path))
+                    if not local_client.realizeFile(path=result.console_out):
+                        print('Downloading console output {}...'.format(result.console_out))
+                        local_path = mt.realizeFile(path=result.console_out, download_from=download_from)
                         if not local_path:
-                            raise Exception('Unable to realize output {} from {}'.format(output_name, output_path))
-                if not local_client.realizeFile(path=result.console_out):
-                    print('Downloading console output {}...'.format(result.console_out))
-                    local_path = mt.realizeFile(path=result.console_out, download_from=download_from)
-                    if not local_path:
-                        raise Exception('Unable to realize console output from {}'.format(output_name))
-                
-                
+                            raise Exception('Unable to realize console output from {}'.format(output_name))
 
         mtlogging.sublog('caching-results-locally')
         # save results to local cache
         for ii, result in enumerate(results):
             if result and (result.retcode == 0):
                 jobs2[ii].storeResultInCache(result)
-            
+
         return [job.result for job in jobs]
 
     # Not using compute resource, do this locally
@@ -215,17 +230,16 @@ def executeBatch(*, jobs, label='', num_workers=None, compute_resource=None, hal
                     else:
                         break
                 return None
-                    
+
         for i, job in enumerate(jobs2):
-            job.result = results2[i]
+            job.result.fromObject(results2[i].getObject())
     else:
         # using srun
-        keep_temp_files = True
-        with TemporaryDirectory(remove=(not keep_temp_files)) as temp_path:
+        with TemporaryDirectory(remove=True) as temp_path:
             local_client = MountainClient()
             job_objects = [job.getObject() for job in jobs2]
-            jobs_path=os.path.join(temp_path, 'jobs.json')
-            job_index_file=os.path.join(temp_path, 'job_index.txt')
+            jobs_path = os.path.join(temp_path, 'jobs.json')
+            job_index_file = os.path.join(temp_path, 'job_index.txt')
             with open(job_index_file, 'w') as f:
                 f.write('0')
             local_client.saveObject(object=job_objects, dest_path=jobs_path)
@@ -290,7 +304,7 @@ def executeBatch(*, jobs, label='', num_workers=None, compute_resource=None, hal
                 srun_sh_script.substitute('{srun_opts}', srun_opts_adjusted)
                 srun_sh_script.substitute('{srun_py_script}', srun_py_script.scriptPath())
                 srun_sh_scripts.append(srun_sh_script)
-            
+
             for srun_sh_script in srun_sh_scripts:
                 srun_sh_script.start()
             for srun_sh_script in srun_sh_scripts:
@@ -301,8 +315,8 @@ def executeBatch(*, jobs, label='', num_workers=None, compute_resource=None, hal
                     for srun_sh_script in srun_sh_scripts:
                         srun_sh_script.stop()
                     raise Exception('Non-zero return code for srun script.')
-            
-            result_objects=[]
+
+            result_objects = []
             for ii, job in enumerate(jobs2):
                 print('Loading result object...', job_result_key, str(ii))
                 num_tries = 0
@@ -313,7 +327,7 @@ def executeBatch(*, jobs, label='', num_workers=None, compute_resource=None, hal
                         print('=====================', local_client.getValue(key=job_result_key, subkey='-'))
                         print('=====================', local_client.getValue(key=job_result_key, subkey=str(ii)))
                         num_tries = num_tries + 1
-                        if num_tries>=3:
+                        if num_tries >= 3:
                             raise Exception('Unable to load result object after {} tries.')
                         print('Retrying...')
                         time.sleep(1)
@@ -323,29 +337,32 @@ def executeBatch(*, jobs, label='', num_workers=None, compute_resource=None, hal
                 result_objects.append(result_object)
             results2 = [MountainJobResult(result_object=obj) for obj in result_objects]
             for i, job in enumerate(jobs2):
-                job.result = results2[i]
+                job.result.fromObject(results2[i].getObject())
 
     return [job.result for job in jobs]
+
 
 def _take_next_batch_job_index_to_run(job_index_file):
     while True:
         time.sleep(random.uniform(0, 0.1))
-        fname2=_attempt_lock_file(job_index_file)
+        fname2 = _attempt_lock_file(job_index_file)
         if fname2:
-            index=int(_read_text_file(fname2))
-            _write_text_file(fname2,'{}'.format(index+1))
-            os.rename(fname2,job_index_file) # put it back
+            index = int(_read_text_file(fname2))
+            _write_text_file(fname2, '{}'.format(index + 1))
+            os.rename(fname2, job_index_file)  # put it back
             return index
+
 
 def _attempt_lock_file(fname):
     if os.path.exists(fname):
-        fname2=fname+'.lock.'+_random_string(6)
+        fname2 = fname + '.lock.' + _random_string(6)
         try:
             os.rename(fname, fname2)
         except:
             return False
         if os.path.exists(fname2):
             return fname2
+
 
 def _set_job_status(job, status):
     local_client = MountainClient()
@@ -355,13 +372,14 @@ def _set_job_status(job, status):
         subkey = str(job_index)
         local_client.setValue(key=job_status_key, subkey=subkey, value=status)
 
+
 def _set_job_result(job, result_object):
     local_client = MountainClient()
     job_result_key = getattr(job, 'job_result_key', None)
     job_index = getattr(job, 'job_index', None)
     if job_result_key:
         subkey = str(job_index)
-        num_tries=0
+        num_tries = 0
         while True:
             print('Saving result object...')
             local_client.saveObject(key=job_result_key, subkey=subkey, object=result_object)
@@ -380,6 +398,7 @@ def _set_job_result(job, result_object):
                 # we are good
                 break
 
+
 @mtlogging.log()
 def _execute_job(job):
     local_client = MountainClient()
@@ -388,10 +407,13 @@ def _execute_job(job):
         halt_val = local_client.getValue(key=halt_key)
         if halt_val:
             raise Exception('Batch halted.')
-    
+
     _set_job_status(job, 'running')
 
-    result = job.execute()
+    if hasattr(job, 'job_handler'):
+        result = job.job_handler.executeJob(job)
+    else:
+        result = job.execute()
 
     if result:
         if result.retcode == 0:
@@ -404,27 +426,31 @@ def _execute_job(job):
 
     return result
 
+
 def _adjust_srun_opts_for_num_jobs(srun_opts, num_workers, num_jobs):
     vals = srun_opts.split()
     for i in range(len(vals)):
-        if vals[i] == '-n' and (i+1<len(vals)):
-            nval = int(vals[i+1])
+        if vals[i] == '-n' and (i + 1 < len(vals)):
+            nval = int(vals[i + 1])
             if num_jobs <= nval:
                 nval = num_jobs
                 num_workers = 1
-            elif num_jobs <= nval * (num_workers-1):
-                num_workers = int((num_jobs-1)/nval) + 1
-            vals[i+1] = str(nval)
+            elif num_jobs <= nval * (num_workers - 1):
+                num_workers = int((num_jobs - 1) / nval) + 1
+            vals[i + 1] = str(nval)
     return ' '.join(vals), num_workers
+
 
 def _random_string(num_chars):
     chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
     return ''.join(random.choice(chars) for _ in range(num_chars))
 
-def _write_text_file(fname,txt):
-    with open(fname,'w') as f:
+
+def _write_text_file(fname, txt):
+    with open(fname, 'w') as f:
         f.write(txt)
 
+
 def _read_text_file(fname):
-    with open(fname,'r') as f:
+    with open(fname, 'r') as f:
         return f.read()
